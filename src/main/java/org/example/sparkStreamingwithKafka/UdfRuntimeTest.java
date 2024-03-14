@@ -6,6 +6,7 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.streaming.StreamingQueryException;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.IntegerType;
 
 import java.io.Serializable;
 import java.util.Collections;
@@ -23,8 +24,9 @@ public class UdfRuntimeTest implements Serializable {
             .getOrCreate();
 
     public void udf() throws TimeoutException, StreamingQueryException {
+
         String jsCode = """
-                    function sum(a,b){
+                    function sum(a,b){ 
                             let x = {"id":a.id,
                                      "name": a.name,
                                      "readings":{
@@ -46,39 +48,47 @@ public class UdfRuntimeTest implements Serializable {
                                             }
                                      },
                                      "city" : b
-                                     },  43]
-                                     };
+                                     }]};
                             return x;
                             }
+                          
                 """;
 
-        String sample = "{\"id\":123,\"name\":\"abc\",\"readings\": { \"temperature\":50.2, \"pressure\": {\"P1\":270.5,\"P2\":250 } },\"city\" : \"delhi\", \"some\"  : [{\"id\":123,\"name\":\"abc\",\"readings\": { \"temperature\":50.2, \"pressure\": {\"P1\":270.5,\"P2\":250 } },\"city\" : \"delhi\"}, 43]}";
+        String jsCode1 ="""
+                            function product(a,b){
+                                let result = a*b;
+                                let p = ["hello","world"]
+                                return p;
+                            }
+                        """;
+
+        String sample = "{\"id\":123,\"name\":\"abc\",\"readings\": { \"temperature\":50.2, \"pressure\": {\"P1\":270.5,\"P2\":250 } },\"city\" : \"delhi\", \"some\"  : [{\"id\":123,\"name\":\"abc\",\"readings\": { \"temperature\":50.2, \"pressure\": {\"P1\":270.5,\"P2\":250 } },\"city\" : \"delhi\"}]}";
         Dataset<String> dataFrame = spark.createDataset(Collections.singletonList(sample), Encoders.STRING());
         String schema = spark.read().json(dataFrame).schema().json();
 
-        var x = new UdfTemplate("sum", "js", jsCode, schema);
+        var x = new UdfTemplate("sum", "js", jsCode, schema ,null);
 
-        spark.sqlContext().udf().register("sum", x, x.DataTypeHolder.);
+        spark.sqlContext().udf().register("sum", x, x.getSchema());
 
-        //spark.sql("SELECT generic_udf('Hello', ' World')").show();
+
+        //spark.sql("SELECT sum(3, 5)").show();
         spark.readStream()
                 .format("socket")
                 .option("host", "localhost")
                 .option("port", 9999)
                 .load()
                 .selectExpr("sum(struct(123 as id, 'abc' as name, struct(50.2 as temperature, struct(270.5 as P1, 250 as P2) as pressure) as readings), 'delhi') as data")
+                .selectExpr("to_json(data)")
                 .writeStream()
                 .format("console")
+                .option("truncate", false)
                 .start().awaitTermination();
+
 
     }
 
     public static class DataTypeHolder {
         private DataType dataType;
-
-        private String name;
-
-        private boolean struct;
         private List<DataTypeHolder> dataTypeHolders;
 
         public static DataTypeHolder resolve(String sampleJson){
